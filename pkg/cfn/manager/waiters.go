@@ -36,7 +36,7 @@ func (c *StackCollection) waitWithAcceptors(i *Stack, acceptors []request.Waiter
 	}
 
 	troubleshoot := func(desiredStatus string) {
-		s, err := c.describeStack(i)
+		s, err := c.DescribeStack(i)
 		if err != nil {
 			logger.Debug("describeErr=%v", err)
 		} else {
@@ -109,7 +109,7 @@ func (c *StackCollection) troubleshootStackFailureCause(i *Stack, desiredStatus 
 	}
 }
 
-func (c *StackCollection) doWaitUntilStackIsCreated(i *Stack) error {
+func (c *StackCollection) DoWaitUntilStackIsCreated(i *Stack) error {
 	return c.waitWithAcceptors(i,
 		waiters.MakeAcceptors(
 			stackStatus,
@@ -132,14 +132,14 @@ func (c *StackCollection) doWaitUntilStackIsCreated(i *Stack) error {
 	)
 }
 
-func (c *StackCollection) waitUntilStackIsCreated(i *Stack, stack builder.ResourceSet, errs chan error) {
+func (c *StackCollection) WaitUntilStackIsCreated(i *Stack, stack builder.ResourceSet, errs chan error) {
 	defer close(errs)
 
-	if err := c.doWaitUntilStackIsCreated(i); err != nil {
+	if err := c.DoWaitUntilStackIsCreated(i); err != nil {
 		errs <- err
 		return
 	}
-	s, err := c.describeStack(i)
+	s, err := c.DescribeStack(i)
 	if err != nil {
 		errs <- err
 		return
