@@ -1,7 +1,6 @@
 package delete
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/kris-nova/logger"
@@ -30,8 +29,8 @@ func deleteNodeGroupCmd(g *cmdutils.Grouping) *cobra.Command {
 		Use:     "nodegroup",
 		Short:   "Delete a nodegroup",
 		Aliases: []string{"ng"},
-		Run: func(_ *cobra.Command, args []string) {
-			if err := doDeleteNodeGroup(p, cfg, ng, cmdutils.GetNameArg(args)); err != nil {
+		Run: func(cmd *cobra.Command, args []string) {
+			if err := doDeleteNodeGroup(p, cfg, ng, cmdutils.GetNameArg(args), cmd); err != nil {
 				logger.Critical("%s\n", err.Error())
 				os.Exit(1)
 			}
@@ -43,7 +42,8 @@ func deleteNodeGroupCmd(g *cmdutils.Grouping) *cobra.Command {
 	group.InFlagSet("General", func(fs *pflag.FlagSet) {
 		fs.StringVar(&cfg.Metadata.Name, "cluster", "", "EKS cluster name")
 		cmdutils.AddRegionFlag(fs, p)
-		fs.StringVarP(&ng.Name, "name", "n", "", "Name of the nodegroup to delete (required)")
+		fs.StringVarP(&ng.Name, "name", "n", "", "Name of the nodegroup to delete")
+		cmdutils.AddConfigFileFlag(&clusterConfigFile, fs)
 		cmdutils.AddWaitFlag(&wait, fs, "deletion of all resources")
 		cmdutils.AddUpdateAuthConfigMap(&updateAuthConfigMap, fs, "Remove nodegroup IAM role from aws-auth configmap")
 		fs.BoolVar(&deleteNodeGroupDrain, "drain", true, "Drain and cordon all nodes in the nodegroup before deletion")
@@ -56,31 +56,36 @@ func deleteNodeGroupCmd(g *cmdutils.Grouping) *cobra.Command {
 	return cmd
 }
 
-func doDeleteNodeGroup(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.NodeGroup, nameArg string) error {
-	ctl := eks.New(p, cfg)
+func doDeleteNodeGroup(p *api.ProviderConfig, cfg *api.ClusterConfig, ng *api.NodeGroup, nameArg string, cmd *cobra.Command) error {
+	cfgLoader := cmdutils.NewClusterConfigLoader(p, cfg, clusterConfigFile, cmd)
 
-	if err := api.Register(); err != nil {
+	cfgLoader.ValidateWithoutConfigFile = func() error {
+		if cfg.Metadata.Name == "" {
+			return cmdutils.ErrMustBeSet("--cluster")
+		}
+		if ng.Name != "" && nameArg != "" {
+			return cmdutils.ErrNameFlagAndArg(ng.Name, nameArg)
+		}
+
+		if nameArg != "" {
+			ng.Name = nameArg
+		}
+
+		if ng.Name == "" {
+			return cmdutils.ErrMustBeSet("--name")
+		}
+
+		return nil
+	}
+
+	if err := cfgLoader.Load(); err != nil {
 		return err
 	}
+
+	ctl := eks.New(p, cfg)
 
 	if err := ctl.CheckAuth(); err != nil {
 		return err
-	}
-
-	if cfg.Metadata.Name == "" {
-		return errors.New("--cluster must be set")
-	}
-
-	if ng.Name != "" && nameArg != "" {
-		return cmdutils.ErrNameFlagAndArg(ng.Name, nameArg)
-	}
-
-	if nameArg != "" {
-		ng.Name = nameArg
-	}
-
-	if ng.Name == "" {
-		return fmt.Errorf("--name must be set")
 	}
 
 	if err := ctl.GetCredentials(cfg); err != nil {

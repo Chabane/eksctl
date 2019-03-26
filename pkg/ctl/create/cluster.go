@@ -103,69 +103,40 @@ func createClusterCmd(g *cmdutils.Grouping) *cobra.Command {
 }
 
 func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, nameArg string, cmd *cobra.Command) error {
-	meta := cfg.Metadata
-
-	printer := printers.NewJSONPrinter()
-
-	if err := api.Register(); err != nil {
-		return err
-	}
 
 	ngFilter := NewNodeGroupFilter()
 
-	if clusterConfigFile != "" {
-		if err := eks.LoadConfigFromFile(clusterConfigFile, cfg); err != nil {
-			return err
-		}
-		meta = cfg.Metadata
+	cfgLoader := cmdutils.NewClusterConfigLoader(p, cfg, clusterConfigFile, cmd)
 
-		incompatibleFlags := []string{
-			"name",
-			"tags",
-			"zones",
-			"version",
-			"region",
-			"nodes",
-			"nodes-min",
-			"nodes-max",
-			"node-type",
-			"node-volume-size",
-			"node-volume-type",
-			"max-pods-per-node",
-			"node-ami",
-			"node-ami-family",
-			"ssh-access",
-			"ssh-public-key",
-			"node-private-networking",
-			"node-security-groups",
-			"node-labels",
-			"node-zones",
-			"asg-access",
-			"external-dns-access",
-			"full-ecr-access",
-			"storage-class",
-			"vpc-private-subnets",
-			"vpc-public-subnets",
-			"vpc-cidr",
-			"vpc-from-kops-cluster",
-		}
+	cfgLoader.FlagsIncompatibleWithConfigFile.Insert(
+		"tags",
+		"zones",
+		"nodes",
+		"nodes-min",
+		"nodes-max",
+		"node-type",
+		"node-volume-size",
+		"node-volume-type",
+		"max-pods-per-node",
+		"node-ami",
+		"node-ami-family",
+		"ssh-access",
+		"ssh-public-key",
+		"node-private-networking",
+		"node-security-groups",
+		"node-labels",
+		"node-zones",
+		"asg-access",
+		"external-dns-access",
+		"full-ecr-access",
+		"storage-class",
+		"vpc-private-subnets",
+		"vpc-public-subnets",
+		"vpc-cidr",
+		"vpc-from-kops-cluster",
+	)
 
-		for _, f := range incompatibleFlags {
-			if cmd.Flag(f).Changed {
-				return fmt.Errorf("cannot use --%s when --config-file/-f is set", f)
-			}
-		}
-
-		if meta.Name == "" {
-			return fmt.Errorf("metadata.name must be set")
-		}
-
-		if meta.Region == "" {
-			return fmt.Errorf("metadata.region must be set")
-		}
-
-		p.Region = meta.Region
-
+	cfgLoader.ValidateWithConfigFile = func() error {
 		if cfg.VPC == nil {
 			cfg.VPC = api.NewClusterVPC()
 		}
@@ -176,11 +147,11 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, nameArg stri
 
 		skipNodeGroupsIfRequested(cfg)
 
-		if err := CheckEachNodeGroup(ngFilter, cfg, NewNodeGroupChecker); err != nil {
-			return err
-		}
-	} else {
-		// validation and defaulting specific to when --config-file is unused
+		return CheckEachNodeGroup(ngFilter, cfg, NewNodeGroupChecker)
+	}
+
+	cfgLoader.ValidateWithoutConfigFile = func() error {
+		meta := cfg.Metadata
 
 		// generate cluster name or use either flag or argument
 		if utils.ClusterName(meta.Name, nameArg) == "" {
@@ -194,7 +165,7 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, nameArg stri
 
 		skipNodeGroupsIfRequested(cfg)
 
-		err := CheckEachNodeGroup(ngFilter, cfg, func(i int, ng *api.NodeGroup) error {
+		return CheckEachNodeGroup(ngFilter, cfg, func(i int, ng *api.NodeGroup) error {
 			if ng.AllowSSH && ng.SSHPublicKeyPath == "" {
 				return fmt.Errorf("--ssh-public-key must be non-empty string")
 			}
@@ -204,11 +175,10 @@ func doCreateCluster(p *api.ProviderConfig, cfg *api.ClusterConfig, nameArg stri
 
 			return nil
 		})
-		if err != nil {
-			return err
-		}
 	}
 
+	meta := cfg.Metadata
+	printer := printers.NewJSONPrinter()
 	ctl := eks.New(p, cfg)
 
 	if !ctl.IsSupportedRegion() {
